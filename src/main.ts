@@ -14,6 +14,10 @@ var sceneToRender = null;
 var createDefaultEngine = function() { return new BABYLON.Engine(this.canvas, true, { preserveDrawingBuffer: true, stencil: true,  disableWebGL2Support: false}); };
 var agents = [];
 
+var player;
+
+
+
 var createScene = function () {
 
     // This creates a basic Babylon Scene object (non-mesh)
@@ -51,7 +55,7 @@ var createScene = function () {
         detailSampleMaxError: 1,
         };
 
-    navigationPlugin.createNavMesh([staticMesh], navmeshParameters,(navmeshData) =>
+    navigationPlugin.createNavMesh([staticMesh], navmeshParameters, async (navmeshData) =>
     {
         console.log("got worker data", navmeshData);
         navigationPlugin.buildFromNavmeshData(navmeshData);
@@ -73,23 +77,28 @@ var createScene = function () {
             maxSpeed: 1.0,
             collisionQueryRange: 0.5,
             pathOptimizationRange: 0.0,
-            separationWeight: 1.0};
+            separationWeight: 1.0
+        };
             
         for (i = 0; i <1; i++) {
             var width = 0.20;
             //player
-            var agentCube = BABYLON.MeshBuilder.CreateBox("cube", { size: width, height: width }, scene);
-            
+            player  = await BABYLON.SceneLoader.ImportMeshAsync("", "assets/models/", "Adventurer.glb", scene, (meshes)=>{
+                // console.log(meshes);
+                // meshes[0].position = new BABYLON.Vector3(0, 0.5, 0);
+            });
+            // player = BABYLON.MeshBuilder.CreateBox("player", {size: 0.2, height: 0.2}, scene);
+
             var targetCube = BABYLON.MeshBuilder.CreateBox("cube", { size: 0.1, height: 0.1 }, scene);
             var matAgent = new BABYLON.StandardMaterial('mat2', scene);
             var variation = Math.random();
             matAgent.diffuseColor = new BABYLON.Color3(0.4 + variation * 0.6, 0.3, 1.0 - variation * 0.3);
-            agentCube.material = matAgent;
+            // agentCube.material = matAgent;
             var randomPos = navigationPlugin.getRandomPointAround(new BABYLON.Vector3(-2.0, 0.1, -1.8), 0.5);
             var transform = new BABYLON.TransformNode("transform");
-            //agentCube.parent = transform;
+            // player.meshes[0].parent = transform;
             var agentIndex = crowd.addAgent(randomPos, agentParams, transform);
-            agents.push({idx:agentIndex, trf:transform, mesh:agentCube, target:targetCube});
+            agents.push({idx:agentIndex, trf:transform, mesh: player.meshes[0], target:targetCube});
         }
         
         var startingPoint;
@@ -105,7 +114,7 @@ var createScene = function () {
         }
 
         var pointerDown = function (mesh) {
-                currentMesh = mesh;
+                currentMesh = mesh[0];
                 startingPoint = getGroundPosition();
                 if (startingPoint) { // we need to disconnect camera from canvas
                     setTimeout(function () {
@@ -128,9 +137,9 @@ var createScene = function () {
                     if(pointerInfo.pickInfo.hit) {
                         pointerDown(pointerInfo.pickInfo.pickedMesh)
                     }
-                    break;
-                    }
-                    });
+                break;
+            }
+        });
 
         scene.onBeforeRenderObservable.add(()=> {
             var agentCount = agents.length;
@@ -138,13 +147,15 @@ var createScene = function () {
             {
                 var ag = agents[i];
                 ag.mesh.position = crowd.getAgentPosition(ag.idx);
+                // ag.mesh.rotation = new BABYLON.Vector3(0, -2 , 0);  
                 let vel = crowd.getAgentVelocity(ag.idx);
                 crowd.getAgentNextTargetPathToRef(ag.idx, ag.target.position);
                 if (vel.length() > 0.2)
                 {
                     vel.normalize();
                     var desiredRotation = Math.atan2(vel.x, vel.z);
-                    ag.mesh.rotation.y = ag.mesh.rotation.y + (desiredRotation - ag.mesh.rotation.y) * 0.05;
+                    ag.mesh.rotation = new BABYLON.Vector3(0, ag.mesh.rotation.y - (desiredRotation + ag.mesh.rotation.y) * 0.05, 0);
+                    // console.log("Mesh Rotation ====== ", player.meshes[0].rotation );
                 }
             }
         });
@@ -153,19 +164,32 @@ var createScene = function () {
 };
 
 function createStaticMesh(scene) {
-    var ground = BABYLON.Mesh.CreateGround("ground1", 6, 6, 2, scene);
+    var ground = BABYLON.Mesh.CreateGround("ground1", 20, 20, 2, scene);
+
+    var mat1 = new BABYLON.StandardMaterial('mat1', scene);
+    mat1.diffuseColor = new BABYLON.Color3(1, 1, 1);
+
+    var sphere = BABYLON.MeshBuilder.CreateSphere("sphere1", {diameter: 2, segments: 16}, scene);
+    sphere.material = mat1;
+    sphere.position.y = 1;
+
+    var cube = BABYLON.MeshBuilder.CreateBox("cube", { size: 1, height: 3 }, scene);
+    cube.position = new BABYLON.Vector3(1, 1.5, 0);
+    //cube.material = mat2;
+
 
     // Materials
     var mat1 = new BABYLON.StandardMaterial('mat1', scene);
     mat1.diffuseColor = new BABYLON.Color3(1, 1, 1);
     //cube.material = mat2;
 
-    var mesh = BABYLON.Mesh.MergeMeshes([ ground]);
+    var mesh = BABYLON.Mesh.MergeMeshes([ sphere, cube, ground]);
     return mesh;
 }
 
 var initFunction = async function() {
-            
+
+
     await Recast();
     // console.log("Recast .......... ",Recast);
     var asyncEngineCreation = async function() {
