@@ -15,6 +15,8 @@ var createDefaultEngine = function() { return new BABYLON.Engine(this.canvas, tr
 var agents = [];
 
 var player;
+var idle;
+var run ;
 
 
 
@@ -30,13 +32,23 @@ var createScene = function () {
     // This targets the camera to scene origin
     camera.setTarget(BABYLON.Vector3.Zero());
     // This attaches the camera to the canvas
-    // camera.attachControl(canvas, true);
-    camera.detachControl();
+    camera.attachControl(canvas, true);
+    // camera.detachControl();
 
     // This creates a light, aiming 0,1,0 - to the sky (non-mesh)
     var light = new BABYLON.HemisphericLight("light1", new BABYLON.Vector3(0, 1, 0), scene);
     // Default intensity is 1. Let's dim the light a small amount
     light.intensity = 0.7;
+
+    var skybox = BABYLON.MeshBuilder.CreateBox("skyBox", { size: 3000.0 }, scene);
+    var skyboxMaterial = new BABYLON.StandardMaterial("skyBox", scene);
+    skyboxMaterial.backFaceCulling = false;
+    skyboxMaterial.reflectionTexture = new BABYLON.CubeTexture("assets/skybox/skybox", scene);
+    skyboxMaterial.reflectionTexture.coordinatesMode = BABYLON.Texture.SKYBOX_MODE;
+    skyboxMaterial.diffuseColor = new BABYLON.Color3(0, 0, 0);
+    skyboxMaterial.specularColor = new BABYLON.Color3(0, 0, 0);
+    skyboxMaterial.disableLighting = true;
+    skybox.material = skyboxMaterial;
 
     var staticMesh = createStaticMesh(scene);
     var navmeshParameters = {
@@ -83,13 +95,14 @@ var createScene = function () {
         for (i = 0; i <1; i++) {
             var width = 0.20;
             //player
-            player  = await BABYLON.SceneLoader.ImportMeshAsync("", "assets/models/", "Adventurer.glb", scene, (meshes)=>{
-                // console.log(meshes);
-                // meshes[0].position = new BABYLON.Vector3(0, 0.5, 0);
-            });
-            // player = BABYLON.MeshBuilder.CreateBox("player", {size: 0.2, height: 0.2}, scene);
+            player  = await BABYLON.SceneLoader.ImportMeshAsync("", "assets/models/", "Character.glb", scene);
+            player.meshes[0].scaling = new BABYLON.Vector3(0.3, 0.3, 0.3);
+
+            idle = player.animationGroups[0];
+            run = player.animationGroups[2];
 
             var targetCube = BABYLON.MeshBuilder.CreateBox("cube", { size: 0.1, height: 0.1 }, scene);
+            targetCube.visibility = 0;
             var matAgent = new BABYLON.StandardMaterial('mat2', scene);
             var variation = Math.random();
             matAgent.diffuseColor = new BABYLON.Color3(0.4 + variation * 0.6, 0.3, 1.0 - variation * 0.3);
@@ -118,17 +131,18 @@ var createScene = function () {
                 startingPoint = getGroundPosition();
                 if (startingPoint) { // we need to disconnect camera from canvas
                     setTimeout(function () {
-                        // camera.detachControl(this.canvas);
+                        // camera.detachControl(canvas);
                     }, 0);
                     var agents = crowd.getAgents();
                     var i;
                     for (i=0;i<agents.length;i++) {
                         var randomPos = navigationPlugin.getRandomPointAround(startingPoint, 1.0);
+                        scene.onBeforeRenderObservable.runCoroutineAsync(this.animationBlend(run,idle));
                         crowd.agentGoto(agents[i], navigationPlugin.getClosestPoint(startingPoint));
                     }
-                    var pathPoints = navigationPlugin.computePath(crowd.getAgentPosition(agents[0]), navigationPlugin.getClosestPoint(startingPoint));
-                    pathLine = BABYLON.MeshBuilder.CreateDashedLines("ribbon", {points: pathPoints, updatable: true, instance: pathLine}, scene);
-                }
+                    // var pathPoints = navigationPlugin.computePath(crowd.getAgentPosition(agents[0]), navigationPlugin.getClosestPoint(startingPoint));
+                    // pathLine = BABYLON.MeshBuilder.CreateDashedLines("ribbon", {points: pathPoints, updatable: true, instance: pathLine}, scene);
+                }            
         }
         
         scene.onPointerObservable.add((pointerInfo) => {      		
@@ -142,20 +156,24 @@ var createScene = function () {
         });
 
         scene.onBeforeRenderObservable.add(()=> {
+            // camera.position = new BABYLON.Vector3(player.meshes[0].position.x, player.meshes[0].position.y + 10, player.meshes[0].position.x);
             var agentCount = agents.length;
             for(let i = 0;i<agentCount;i++)
             {
                 var ag = agents[i];
                 ag.mesh.position = crowd.getAgentPosition(ag.idx);
-                // ag.mesh.rotation = new BABYLON.Vector3(0, -2 , 0);  
+
                 let vel = crowd.getAgentVelocity(ag.idx);
-                crowd.getAgentNextTargetPathToRef(ag.idx, ag.target.position);
-                if (vel.length() > 0.2)
-                {
+
+                if(vel.length() > 0.2){
                     vel.normalize();
-                    var desiredRotation = Math.atan2(vel.x, vel.z);
-                    ag.mesh.rotation = new BABYLON.Vector3(0, ag.mesh.rotation.y - (desiredRotation + ag.mesh.rotation.y) * 0.05, 0);
-                    // console.log("Mesh Rotation ====== ", player.meshes[0].rotation );
+                    BABYLON.Quaternion.SlerpToRef(
+                        ag.mesh.rotationQuaternion, 
+                        BABYLON.Quaternion.RotationAxis(new BABYLON.Vector3(0,1,0), Math.atan2(vel.x, vel.z)), 
+                        0.1, 
+                        ag.mesh.rotationQuaternion
+                    );
+                    scene.onBeforeRenderObservable.runCoroutineAsync(this.animationBlend(idle,run));
                 }
             }
         });
@@ -173,8 +191,8 @@ function createStaticMesh(scene) {
     sphere.material = mat1;
     sphere.position.y = 1;
 
-    var cube = BABYLON.MeshBuilder.CreateBox("cube", { size: 1, height: 3 }, scene);
-    cube.position = new BABYLON.Vector3(1, 1.5, 0);
+    // var cube = BABYLON.MeshBuilder.CreateBox("cube", { size: 1, height: 3 }, scene);
+    // cube.position = new BABYLON.Vector3(1, 1.5, 0);
     //cube.material = mat2;
 
 
@@ -183,7 +201,7 @@ function createStaticMesh(scene) {
     mat1.diffuseColor = new BABYLON.Color3(1, 1, 1);
     //cube.material = mat2;
 
-    var mesh = BABYLON.Mesh.MergeMeshes([ sphere, cube, ground]);
+    var mesh = BABYLON.Mesh.MergeMeshes([ sphere, ground]);
     return mesh;
 }
 
@@ -209,6 +227,25 @@ var initFunction = async function() {
 
 initFunction().then(() => {sceneToRender = scene                    
 });
+
+
+
+function *animationBlend(toAnim: BABYLON.AnimationGroup, fromAnim: BABYLON.AnimationGroup): Iterable<void>{
+    let currentWeight = 1;
+    let newWeight = 0;
+
+    toAnim.play(true);
+
+
+    while(newWeight < 1){
+        newWeight += 0.05;
+        currentWeight -= 0.05;
+        toAnim.setWeightForAllAnimatables(newWeight);
+        fromAnim.setWeightForAllAnimatables(currentWeight);
+        yield;
+    }
+}
+
 
 // Resize
 window.addEventListener("resize", function () {
